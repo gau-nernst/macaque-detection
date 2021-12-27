@@ -4,7 +4,15 @@ Example on how to run PyTorch ResNet18 on KV260.
 
 ## Environment
 
-Training environment (to train the model)
+### Flash board image to KV260
+
+Follow the instruction here: https://github.com/Xilinx/Vitis-AI/tree/master/setup/mpsoc/VART
+
+- Download board image: https://www.xilinx.com/member/forms/download/design-license-xef.html?filename=xilinx-kv260-dpu-v2020.2-v1.4.0.img.gz
+- Use [Etcher](https://www.balena.io/etcher/) to flash the image to your micro SD card (recommend to use the portable version)
+- Note: this board image is configured for B4096 architecture, and uses Vitis-AI 1.4.0
+
+### Training environment (to train the model)
 
 - Only PyTorch and torchvision required
 - [Official instruction](https://pytorch.org/get-started/locally/)
@@ -23,13 +31,13 @@ Vitis AI environment (to compile the model)
 - [Official instruction](https://github.com/Xilinx/Vitis-AI)
 - GPU Docker image is not required
 - Docker with WSL also works
-- Version used in this example: Vitis-AI 1.4.1
+- Note: use Vitis-AI 1.4.0 so that it matches the board image. 1.4.1 might work but we haven't tested.
 - Example (assumed Docker is installed)
 
 ```bash
-wget https://github.com/Xilinx/Vitis-AI/archive/refs/tags/v1.4.1.zip    # download Vitis-AI
-unzip Vitis-AI-1.4.1.zip
-docker pull xilinx/vitis-ai-cpu:latest              # download Vitis-AI Docker image
+wget https://github.com/Xilinx/Vitis-AI/archive/refs/tags/v1.4.zip  # download Vitis-AI
+unzip Vitis-AI-1.4.zip
+docker pull xilinx/vitis-ai:1.4.916                 # download Vitis-AI Docker image
 ```
 
 ## Dataset
@@ -62,9 +70,9 @@ Note:
 
 ## Create xmodel
 
-You will need a dataset for quantization calibration, and optionally for testing, inside the Docker container. You can either copy your dataset to the `Vitis-AI-1.4.1/` folder, or you can mount the dataset folder in the container.
+You will need a dataset for quantization calibration, and optionally for testing, inside the Docker container. You can either copy your dataset to the `Vitis-AI-1.4/` folder, or you can mount the dataset folder in the container.
 
-To mount your dataset folder in the container, open the file `docker_run.sh` in `Vitis-AI-1.4.1/` and add mount options in the Docker command:
+To mount your dataset folder in the container, open the file `docker_run.sh` in `Vitis-AI-1.4/` and add mount options in the Docker command:
 
 ```bash
 docker_run_params=$(cat <<-END)
@@ -74,12 +82,12 @@ END
 )
 ```
 
-Assume that `/absolute/path/to/dataset` above is the test set of the Cat and Dog dataset we downloaded earlier (`cat-and-dog/test_set/test_set`). You should also copy the file `quantize.py` in this folder to the `Vitis-AI-1.4.1/` folder.
+Assume that `/absolute/path/to/dataset` points the test set of the Cat and Dog dataset we downloaded earlier (`cat-and-dog/test_set/test_set`). You should also copy the file `quantize.py` in this folder, and the trained weights `epoch-006-acc-99.26.pth`, to the `Vitis-AI-1.4/` folder.
 
 Enter Docker and activate the PyTorch environment
 
 ```bash
-cd Vitis-AI-1.4.1
+cd Vitis-AI-1.4
 ./docker_run.sh                     # click through the EULA and press y
 conda activate vitis-ai-pytorch     # activate pytorch environment
 ```
@@ -97,7 +105,7 @@ The first 2 steps are covered in `quantize.py`.
 ### Quantize
 
 ```bash
-python quantize.py calibrate --data_dir /dataset --num_samples 100 --output_dir resnet18
+python quantize.py calibrate --weights_path model.pth --data_dir /dataset --num_samples 100 --output_dir resnet18
 ```
 
 This will take some minutes. When this finishes, you will have `ResNet.py`, `quant_info.json`, and `bias_corr.pth`.
@@ -105,29 +113,41 @@ This will take some minutes. When this finishes, you will have `ResNet.py`, `qua
 Now you can export the quantized model to xmodel format (`output_dir` must be the same as above). You will have `ResNet_int.xmodel`.
 
 ```bash
-python quantize.py export --data_dir /dataset --output_dir resnet18
+python quantize.py export --weights_path model.pth --data_dir /dataset --output_dir resnet18
 ```
 
 ### (Optional) Evaluate
 
+Again, `output_dir` must be the same as above so that Xilinx can obtain information about the quantized model.
+
 ```bash
-python quantize.py test --data_dir /dataset --num_samples 500 --output_dir resnet18
+python quantize.py test --weights_path model.pth --data_dir /dataset --num_samples 500 --output_dir resnet18
 ```
 
 ### Compile
 
-Create a `arch.json` file with the content below. Save it under `Vitis-AI-1.4.1`.
-
-```json
-{
-    "fingerprint":"0x1000020F6014406"
-}
-```
-
-Use the fingerprint file above to compile. Do not use `/opt/vitis_ai/compiler/arch/DPUCZDX8G/KV260/arch.json`.
-
 ```bash
-vai_c_xir --xmodel "resnet18/ResNet_int.xmodel" --arch arch.json --net_name r18_kv260 --output_dir "resnet18/compile"
+vai_c_xir --xmodel "resnet18/ResNet_int.xmodel" --arch "/opt/vitis_ai/compiler/arch/DPUCZDX8G/KV260/arch.json" --net_name r18_kv260 --output_dir "resnet18/compile"
 ```
 
 This will produce `r18_kv260.xmodel`, `meta.json`, and `md5sum.txt`.
+
+## Run ResNet18 on KV260
+
+Assume KV260's IP address is `192.168.1.10`. We only need to copy the compiled xmodel `r18_kv260.xmodel` and sample Python script `app.py` to the board (`app.py` is in this folder). Run the commands below in the host machine, not inside the Docker container.
+
+```bash
+scp app.py root@192.168.1.10:~/
+scp Vitis-AI-1.4/resnet18/compile/r18_kv260.xmodel root@192.168.1.10:~/
+```
+
+You can also use VS Code to open an SSH window connecting to the KV260 board. Then you can drag and drop the files to KV260.
+
+You will also need to copy a sample image to KV260. Assume we have a 224 x 224 image of a cat `cat_224.jpg` copied to the board. Connect to KV260 via ssh and run the app
+
+```bash
+ssh root@192.168.1.10
+
+# inside KV260 now
+python3 app.py --xmodel r18_kv260.xmodel --image cat_224.jpg
+```

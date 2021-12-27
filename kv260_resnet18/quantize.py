@@ -9,11 +9,15 @@ from pytorch_nndct.apis import torch_quantizer
 from tqdm import tqdm
 
 
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
 def get_quantized_model(args):
     model = resnet18()
     model.fc = torch.nn.Linear(model.fc.in_features, args.num_classes)
     model.load_state_dict(torch.load(args.weights_path, map_location="cpu"))
     model.eval()
+    model.to(DEVICE)
 
     sample_inputs = torch.randn((1,3,224,224))
     mode = "calib" if args.command == "calibrate" else "test"
@@ -52,11 +56,12 @@ def validate(model, dataloader):
     correct = 0
 
     for images, labels in tqdm(dataloader):
+        images = images.to(DEVICE)
         outputs = model(images)
         preds = torch.argmax(outputs, dim=-1)
 
         N += len(labels)
-        correct += (preds == labels).sum().item()
+        correct += (preds.cpu() == labels).sum().item()
 
     acc = correct / N
     return acc
@@ -87,6 +92,7 @@ if __name__ == "__main__":
 
     if args.command == "calibrate":
         for images, _ in tqdm(dataloader):
+            images = images.to(DEVICE)
             with torch.no_grad():
                 quant_model(images)
 
@@ -101,6 +107,7 @@ if __name__ == "__main__":
 
     else:
         img, _ = next(iter(dataloader))
+        img = img.to(DEVICE)
         with torch.no_grad():
             quant_model(img)
 
