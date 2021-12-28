@@ -100,12 +100,12 @@ There are 3 steps
 2. (Optional) Evaluate the quantized model and compare it with the original (float) model.
 3. Compile the model
 
-The first 2 steps are covered in `quantize.py`.
+The first 2 steps are covered in `resnet18.py`.
 
 ### Quantize
 
 ```bash
-python quantize.py calibrate --weights_path model.pth --data_dir /dataset --num_samples 100 --output_dir resnet18
+python resnet18.py calibrate --weights model.pth --data_dir /dataset --num_samples 100 --output_dir resnet18
 ```
 
 This will take some minutes. When this finishes, you will have `ResNet.py`, `quant_info.json`, and `bias_corr.pth`.
@@ -113,7 +113,7 @@ This will take some minutes. When this finishes, you will have `ResNet.py`, `qua
 Now you can export the quantized model to xmodel format (`output_dir` must be the same as above). You will have `ResNet_int.xmodel`.
 
 ```bash
-python quantize.py export --weights_path model.pth --data_dir /dataset --output_dir resnet18
+python resnet18.py export --weights model.pth --data_dir /dataset --output_dir resnet18
 ```
 
 ### (Optional) Evaluate
@@ -121,7 +121,7 @@ python quantize.py export --weights_path model.pth --data_dir /dataset --output_
 Again, `output_dir` must be the same as above so that Xilinx can obtain information about the quantized model.
 
 ```bash
-python quantize.py test --weights_path model.pth --data_dir /dataset --num_samples 500 --output_dir resnet18
+python resnet18.py test --weights model.pth --data_dir /dataset --num_samples 500 --output_dir resnet18
 ```
 
 ### Compile

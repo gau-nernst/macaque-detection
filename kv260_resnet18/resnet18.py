@@ -15,9 +15,9 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 def get_quantized_model(args):
     model = resnet18()
     model.fc = torch.nn.Linear(model.fc.in_features, args.num_classes)
-    model.load_state_dict(torch.load(args.weights_path, map_location="cpu"))
-    model.eval()
-    model.to(DEVICE)
+    model.eval().to(DEVICE)
+    if args.weights:
+        model.load_state_dict(torch.load(args.weights, map_location=DEVICE))
 
     sample_inputs = torch.randn((1,3,224,224))
     mode = "calib" if args.command == "calibrate" else "test"
@@ -72,7 +72,7 @@ def get_args_parser():
     parser.add_argument("command", type=str)
     
     parser.add_argument("--num_classes", type=int, default=2)
-    parser.add_argument("--weights_path", type=str, default="./model.pth")
+    parser.add_argument("--weights", type=str, default="")
     parser.add_argument("--output_dir", type=str, default="./resnet18")
     parser.add_argument("--data_dir", type=str, default="./data")
 
