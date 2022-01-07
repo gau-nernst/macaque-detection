@@ -26,6 +26,23 @@ def instance_segmentations_to_bboxes(instances):
 
     return bboxes
 
+def get_box_stats(bboxes):
+    ratios = []
+    sizes = []
+    for x1, y1, x2, y2 in bboxes:
+        w = x2 - x1
+        h = y2 - y1
+        ratios.append(w/h)
+        sizes.append((w*h)**0.5)
+
+def get_image_stats(img_paths):
+    ratios = []
+    sizes = []
+    for path in img_paths:
+        img_w, img_h = Image.open(path).size
+        ratios.append(img_w / img_h)
+        sizes.append((img_w*img_h)**0.5)
+
 def bboxes_to_yolo(img_names, bboxes, img_dir, save_dir):
     os.makedirs(save_dir, exist_ok=True)
     iterator = zip(img_names, bboxes)
@@ -47,7 +64,8 @@ def bboxes_to_yolo(img_names, bboxes, img_dir, save_dir):
                 f.write(f"0 {cx} {cy} {w} {h}\n")
 
 def bboxes_to_coco(img_names, bboxes, img_dir, save_path):
-    count = 0
+    # https://github.com/pytorch/vision/issues/1530
+    ann_id = 1
     images = []
     annotations = []
     categories = [{"id": 0, "name": "macaque"}]
@@ -70,13 +88,14 @@ def bboxes_to_coco(img_names, bboxes, img_dir, save_path):
             w = x2 - x1
             h = y2 - y1
             annotations.append({
-                "id": count,
+                "id": ann_id,
                 "image_id": i,
                 "category_id": 0,
                 "bbox": [x1, y1, w, h],
                 "area": w * h,
                 "iscrowd": 0
             })
+            ann_id += 1
     
     coco_ann = {
         "info": None,
@@ -94,6 +113,7 @@ def main():
     parser.add_argument("--data_dir", type=str)
     parser.add_argument("--output", type=str)
     parser.add_argument("--format", type=str, default="coco")
+    parser.add_argument("--split", type=str, default="train")
     
     args = parser.parse_args()
     assert args.format in ("yolo", "coco")
@@ -102,12 +122,26 @@ def main():
     img_dir = os.path.join(args.data_dir, "images")
 
     df = pd.read_csv(csv_path)
-    bboxes = df["segmentation"].apply(json.loads).apply(instance_segmentations_to_bboxes)
 
+    # train-val split
+    # train: PRI, ZooA, ZooB, ZooC, ZooD
+    # val: OpenImages
+    df_train = df[df["image file name"].str.startswith(("PRI", "Zoo"))]
+    df_val = df[~df.index.isin(df_train.index)]
+    
+    choices = {
+        "all": df,
+        "train": df_train,
+        "val": df_val
+    }
+    df_out = choices[args.split]
+    bboxes = df_out["segmentation"].apply(json.loads).apply(instance_segmentations_to_bboxes)
+
+    output = os.path.join(args.data_dir, args.output)
     if args.format == "yolo":
-        bboxes_to_yolo(df["image file name"].tolist(), bboxes.tolist(), img_dir, args.output)
+        bboxes_to_yolo(df_out["image file name"].tolist(), bboxes.tolist(), img_dir, output)
     else:
-        bboxes_to_coco(df["image file name"].tolist(), bboxes.tolist(), img_dir, args.output)
+        bboxes_to_coco(df_out["image file name"].tolist(), bboxes.tolist(), img_dir, output)
 
 if __name__ == "__main__":
     main()

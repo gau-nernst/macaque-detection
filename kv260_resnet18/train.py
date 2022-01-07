@@ -30,7 +30,7 @@ def get_val_dataloader(args):
         T.ToTensor(),
         T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
     ])
-    ds = ImageFolder(args.test_dir, transform=transform)
+    ds = ImageFolder(args.val_dir, transform=transform)
     dataloader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
     return dataloader

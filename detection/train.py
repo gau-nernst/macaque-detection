@@ -43,7 +43,7 @@ def get_args_parser(add_help=True):
     parser = argparse.ArgumentParser(description="PyTorch Detection Training", add_help=add_help)
 
     parser.add_argument("--data-path", default="/datasets01/COCO/022719/", type=str, help="dataset path")
-    parser.add_argument("--model", default="maskrcnn_resnet50_fpn", type=str, help="model name")
+    parser.add_argument("--model", default="retinanet_resnet50_fpn", type=str, help="model name")
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")
     parser.add_argument(
         "-b", "--batch-size", default=2, type=int, help="images per gpu, the total batch size is $NGPU x batch_size"
@@ -69,7 +69,7 @@ def get_args_parser(add_help=True):
         dest="weight_decay",
     )
     parser.add_argument(
-        "--lr-scheduler", default="multisteplr", type=str, help="name of lr scheduler (default: multisteplr)"
+        "--lr-scheduler", default="cosineannealinglr", type=str, help="name of lr scheduler (default: cosineannealinglr)"
     )
     parser.add_argument(
         "--lr-step-size", default=8, type=int, help="decrease lr every step-size epochs (multisteplr scheduler only)"
