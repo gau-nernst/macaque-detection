@@ -132,6 +132,25 @@ vai_c_xir --xmodel "resnet18/ResNet_int.xmodel" --arch "/opt/vitis_ai/compiler/a
 
 This will produce `r18_kv260.xmodel`, `meta.json`, and `md5sum.txt`.
 
+Sample output
+
+```bash
+**************************************************
+* VITIS_AI Compilation - Xilinx Inc.
+**************************************************
+[UNILOG][INFO] Target architecture: DPUCZDX8G_ISA0_B4096_MAX_BG2
+[UNILOG][INFO] Compile mode: dpu
+[UNILOG][INFO] Debug mode: function
+[UNILOG][INFO] Target architecture: DPUCZDX8G_ISA0_B4096_MAX_BG2
+[UNILOG][INFO] Graph name: ResNet, with op num: 169
+[UNILOG][INFO] Begin to compile...
+[UNILOG][INFO] Total device subgraph number 3, DPU subgraph number 1
+[UNILOG][INFO] Compile done.
+[UNILOG][INFO] The meta json is saved to "/macaque-detection/kv260_resnet18/resnet18/compile/meta.json"
+[UNILOG][INFO] The compiled xmodel is saved to "/macaque-detection/kv260_resnet18/resnet18/compile/r18_kv260.xmodel"
+[UNILOG][INFO] The compiled xmodel's md5sum is d8aa2a6f25878e1b6f4f982f2cc92a79, and has been saved to "/macaque-detection/kv260_resnet18/resnet18/compile/md5sum.txt"
+```
+
 ## Run ResNet18 on KV260
 
 Assume KV260's IP address is `192.168.1.10`. We only need to copy the compiled xmodel `r18_kv260.xmodel` and sample Python script `app.py` to the board (`app.py` is in this folder). Run the commands below in the host machine, not inside the Docker container.

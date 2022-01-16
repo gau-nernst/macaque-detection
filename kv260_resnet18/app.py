@@ -35,7 +35,10 @@ def app(args):
     dpu.wait(job_id)
 
     preds = np.argmax(out_buffer[0])
-    print(preds)
+    scores = np.exp(preds)              # softmax
+    scores = scores / scores.sum()
+    print(f"Prediction: {preds}")
+    print(f"Confidence: {scores[preds]*100:.2f}%")
 
 
 def get_args_parser():

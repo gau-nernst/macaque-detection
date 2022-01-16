@@ -77,7 +77,7 @@ def get_args_parser():
     parser.add_argument("--data_dir", type=str, default="./data")
 
     parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--num_samples", type=int, default=None)
+    parser.add_argument("--num_samples", type=int, default=0)
 
     return parser
 
