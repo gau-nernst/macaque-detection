@@ -2,3 +2,4 @@ __pycache__
 *.pth
 *.xmodel
 compile/
+quant_info.json

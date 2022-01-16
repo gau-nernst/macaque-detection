@@ -49,7 +49,7 @@ def profile(args, runs=100):
 
     dtime = time.time() - time0
     print(f"{runs} runs")
-    print(f"Network time: {dtime/runs:.4f} s/img")
+    print(f"Network time: {dtime/runs*1000:.4f} ms/img")
     print(f"FPS: {runs/dtime:.4f} img/s")
 
 

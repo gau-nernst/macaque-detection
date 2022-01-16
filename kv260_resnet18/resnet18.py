@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import DataLoader, Subset
 from torchvision.datasets import ImageFolder
 import torchvision.transforms as T
-from torchvision.models import resnet18
+from torchvision.models import resnet
 from pytorch_nndct.apis import torch_quantizer
 from tqdm import tqdm
 
@@ -13,7 +13,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def get_quantized_model(args):
-    model = resnet18()
+    model = resnet.__dict__[args.model]()
     model.fc = torch.nn.Linear(model.fc.in_features, args.num_classes)
     model.eval().to(DEVICE)
     if args.weights:
@@ -71,6 +71,7 @@ def get_args_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("command", type=str)
     
+    parser.add_argument("--model", type=str, default="resnet18")
     parser.add_argument("--num_classes", type=int, default=2)
     parser.add_argument("--weights", type=str, default="")
     parser.add_argument("--output_dir", type=str, default="./resnet18")

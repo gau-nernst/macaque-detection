@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
-from torchvision.models import resnet18
+from torchvision.models import resnet
 from torchvision.datasets import ImageFolder
 import torchvision.transforms as T
 try:
@@ -86,20 +86,20 @@ def validate(model: torch.nn.Module, dataloader, device=None):
 def get_args_parser():
     parser = argparse.ArgumentParser()
     
+    parser.add_argument("--model", type=str, default="resnet18")
     parser.add_argument("--num_classes", type=int, default=2)
-    parser.add_argument("--train_dir", type=str, default="data/train")
-    parser.add_argument("--val_dir", type=str, default="data/val")
+    parser.add_argument("--train_dir", type=str)
+    parser.add_argument("--val_dir", type=str)
 
-    parser.add_argument("--num_epochs", type=int, default=30)
+    parser.add_argument("--num_epochs", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--batch_size", type=int, default=16)
     
-    parser.add_argument("--new_format", type=bool, default=True)
     return parser
 
 
 def main(args):
-    m = resnet18(pretrained=True)
+    m = resnet.__dict__[args.model](pretrained=True)
     m.fc = torch.nn.LazyLinear(args.num_classes)
 
     train_dataloader = get_train_dataloader(args)
@@ -112,7 +112,8 @@ def main(args):
     scheduler = SequentialLR(optimizer, [warmup_scheduler, main_scheduler], milestones=[5])
 
     best_acc = 0
-    best_name = "epoch.pth"
+    template_name = "{model}_epoch-{epoch:03d}_acc-{acc:.2f}.pth"
+    best_name = template_name.format(model=args.model, epoch=-1, acc=0)
     for i in range(args.num_epochs):
         print(f"Epoch {i}")
         train_one_epoch(m, train_dataloader, optimizer)
@@ -125,14 +126,11 @@ def main(args):
             best_acc = acc
             if os.path.exists(best_name):
                 os.remove(best_name)
-            
-            best_name =  f"epoch-{i:03d}-acc-{acc*100:.2f}.pth"
-            torch.save(m.state_dict(), best_name, _use_new_zipfile_serialization=args.new_format)
+
+            best_name = template_name.format(model=args.model, epoch=i, acc=acc*100)
+            torch.save(m.state_dict(), best_name)
 
     print(f"Best acc: {best_acc*100:.2f}")
-    m.load_state_dict(torch.load(best_name))
-    m.cpu()
-    torch.jit.save(torch.jit.trace(m, example_inputs=torch.rand(1,3,224,224)), "traced_model.pth")
 
 
 if __name__ == "__main__":
