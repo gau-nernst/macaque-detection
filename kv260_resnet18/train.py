@@ -8,11 +8,15 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torchvision.models import resnet18
 from torchvision.datasets import ImageFolder
 import torchvision.transforms as T
+try:
+    from tqdm import tqdm
+except:
+    tqdm = None
 
 
 def get_train_dataloader(args):
     transform = T.Compose([
-        T.RandomResizedCrop(176),
+        T.RandomResizedCrop(224),
         T.ColorJitter(0.2, 0.2, 0.2),
         T.ToTensor(),
         T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
@@ -43,7 +47,8 @@ def train_one_epoch(model: torch.nn.Module, dataloader: DataLoader, optimizer: t
     model.to(device)
     model.train()
 
-    for (images, labels) in dataloader:
+    iterator = tqdm(dataloader) if tqdm is not None else dataloader
+    for (images, labels) in iterator:
         images = images.to(device)
         labels = labels.to(device)
 
@@ -89,7 +94,7 @@ def get_args_parser():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--batch_size", type=int, default=16)
     
-    parser.add_argument("--new_format", type=bool, default=False)
+    parser.add_argument("--new_format", type=bool, default=True)
     return parser
 
 
@@ -109,7 +114,7 @@ def main(args):
     best_acc = 0
     best_name = "epoch.pth"
     for i in range(args.num_epochs):
-        print(f"Epoch {i}", end="\t")
+        print(f"Epoch {i}")
         train_one_epoch(m, train_dataloader, optimizer)
         scheduler.step()
     
@@ -123,6 +128,11 @@ def main(args):
             
             best_name =  f"epoch-{i:03d}-acc-{acc*100:.2f}.pth"
             torch.save(m.state_dict(), best_name, _use_new_zipfile_serialization=args.new_format)
+
+    print(f"Best acc: {best_acc*100:.2f}")
+    m.load_state_dict(torch.load(best_name))
+    m.cpu()
+    torch.jit.save(torch.jit.trace(m, example_inputs=torch.rand(1,3,224,224)), "traced_model.pth")
 
 
 if __name__ == "__main__":
