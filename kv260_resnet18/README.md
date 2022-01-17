@@ -32,6 +32,7 @@ Vitis AI environment (to compile the model)
 - GPU Docker image is not required
 - Docker with WSL also works
 - Note: use Vitis-AI 1.4.0 so that it matches the board image. 1.4.1 might work but we haven't tested.
+- Compact Docker image (pre-upgraded to PyTorch 1.7.1): https://hub.docker.com/r/gaunernst/vitis-ai-pytorch
 - Example (assumed Docker is installed)
 
 ```bash
@@ -168,5 +169,25 @@ You will also need to copy a sample image to KV260. Assume we have a 224 x 224 i
 ssh root@192.168.1.10
 
 # inside KV260 now
-python3 app.py --xmodel r18_kv260.xmodel --image cat_224.jpg
+python3 app.py predict --xmodel r18_kv260.xmodel --image cat_224.jpg
+# sample output
+# input dim: (1, 224, 224, 3)
+# output dim: (1, 2)
+# Prediction: 0
+# Confidence: 96.04%
+
+python3 app.py profile --xmodel r18_kv260.xmodel --image cat_224.jpg
+# sample output
+# 100 runs
+# Network time: 0.0062 s/img
+# FPS: 162.1122 img/s
 ```
+
+## Profiling results
+
+Model      | Network time (ms/img) | FPS (img/s)
+-----------|-----------------------|------------
+ResNet-18  | 6.1730  | 161.9953
+ResNet-34  | 9.7105  | 102.9813
+ResNet-50  | 15.2562 | 65.5472
+ResNet-101 | 25.5494 | 39.1399
