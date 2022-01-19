@@ -89,5 +89,41 @@ class CenterNet(nn.Module):
     def forward(self, x):
         out = self.backbone(x)
         out = self.neck(out)
-        # return self.heads.heatmap(out), self.heads.box_2d(out)
-        return torch.cat((self.heads.heatmap(out), self.heads.box_2d(out)), dim=1)
+        return self.heads.heatmap(out), self.heads.box_2d(out)
+        # return torch.cat((self.heads.heatmap(out), self.heads.box_2d(out)), dim=1)
+
+    def decode_detections(self, heatmap, box_offsets):
+        batch_size, _, out_h, out_w = heatmap.shape
+
+        # 1. pseudo-nms via max pool
+        nms_mask = F.max_pool2d(heatmap, kernel_size=3, stride=1, padding=1) == heatmap
+        heatmap = heatmap * nms_mask
+        
+        # 2. since box regression is shared, we only consider the best candidate at each heatmap location
+        heatmap, labels = torch.max(heatmap, dim=1)
+
+        # 3. flatten and get topk
+        heatmap = heatmap.view(batch_size, -1)
+        labels = labels.view(batch_size, -1)
+        scores, indices = torch.topk(heatmap, 100)
+        labels = torch.gather(labels, dim=-1, index=indices)
+
+        # 4. decode box
+        cx = indices % out_w + 0.5
+        cy = indices // out_w + 0.5
+
+        box_offsets = box_offsets.flatten(start_dim=-2) * 16
+        box_offsets = box_offsets.clamp_min(0)
+
+        # boxes are in output feature maps coordinates
+        x1 = cx - torch.gather(box_offsets[:,0], dim=-1, index=indices)     # x1 = cx - left
+        y1 = cy - torch.gather(box_offsets[:,1], dim=-1, index=indices)     # y1 = cy - top
+        x2 = cx + torch.gather(box_offsets[:,2], dim=-1, index=indices)     # x2 = cx + right
+        y2 = cy + torch.gather(box_offsets[:,3], dim=-1, index=indices)     # y2 = cy + bottom
+        boxes = torch.stack((x1, y1, x2, y2), dim=-1) * 4                   # convert to input coordinates
+
+        return {
+            "boxes": boxes,
+            "scores": scores,
+            "labels": labels
+        }
