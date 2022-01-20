@@ -14,4 +14,4 @@ Only video file is supported for now
 python inference.py macaque_test_01.mp4 --weights centernet_r34_fpn.pth --threshold 0.1 --img_w 960 --img_h 544
 ```
 
-Dependencies: numpy, torch, torchvision, tqdm, opencv-python, albumentations, pycocotools, PIL.
+Dependencies: numpy, torch, torchvision, tqdm, opencv-python, albumentations, pycocotools, Pillow
