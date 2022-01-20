@@ -2,14 +2,16 @@ import argparse
 
 from pytorch_nndct.apis import torch_quantizer
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader, Subset
+from torch.utils.data._utils.collate import default_collate
 import torchvision.transforms as T
 from tqdm import tqdm
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-from model import CenterNet
+from model import CenterNet, decode_detections
 from data import ImageFolder, CocoDetection, collate_fn, CocoEvaluator
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -33,9 +35,11 @@ def get_dataloader(args):
     if args.command == "test":
         transform = A.Compose([
             A.Resize(512, 512),
-            A.Normalize()
+            A.Normalize(),
+            ToTensorV2()
         ], bbox_params=dict(format="coco", label_fields=["labels"], min_area=1))
-        ds = CocoDetection(args.data_dir, args.ann_json, transforms=transform, collate_fn=collate_fn)
+        ds = CocoDetection(args.data_dir, args.ann_json, transforms=transform)
+        collate = collate_fn
 
     else:
         transform = T.Compose([
@@ -44,6 +48,7 @@ def get_dataloader(args):
             T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
         ])
         ds = ImageFolder(args.data_dir, transform=transform)
+        collate = default_collate
     
     if args.command == "export":
         args.num_samples = 1
@@ -51,21 +56,27 @@ def get_dataloader(args):
     if args.num_samples > 0 and args.num_samples < len(ds):
         ds = Subset(ds, list(range(args.num_samples)))
 
-    dataloader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=2)
+    dataloader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=collate)
     return dataloader
 
 
 @torch.no_grad()
-def validate(model: CenterNet, dataloader):
+def validate(model: CenterNet, dataloader, num_classes):
     model.eval()
-    evaluator = CocoEvaluator()
+    evaluator = CocoEvaluator(num_classes)
     
     for images, targets in tqdm(dataloader):
         images = images.to(DEVICE)
         heatmap, box_offsets = model(images)
-        detections = model.decode_detections(heatmap, box_offsets)
-        
-        detections = [{k: v[i] for k, v in detections.items()} for i in range(len(detections["labels"]))]
+        detections = decode_detections(heatmap, box_offsets)
+
+        detections = {k: v.cpu().numpy() for k, v in detections.items()}
+        detections["boxes"][...,2] -= detections["boxes"][...,0]
+        detections["boxes"][...,3] -= detections["boxes"][...,1]
+        keys = detections.keys()
+        detections = [{k: detections[k][i] for k in keys} for i in range(len(detections["labels"]))]
+
+        targets = [{k: np.array(v) for k, v in target.items()} for target in targets]
         evaluator.update(detections, targets)
 
     return evaluator.get_metrics()
@@ -107,11 +118,11 @@ if __name__ == "__main__":
         quantizer.export_quant_config()
 
     elif args.command == "test":
-        quant_metrics = validate(quant_model, dataloader)
+        quant_metrics = validate(quant_model, dataloader, args.num_classes)
         print(f"Quantized model mAP: {quant_metrics['mAP']*100:.2f}")
 
-        float_metrics = validate(float_model, dataloader)
-        print(f"Original model mAP: {quant_metrics['mAP']*100:.2f}")
+        float_metrics = validate(float_model, dataloader, args.num_classes)
+        print(f"Original model mAP: {float_metrics['mAP']*100:.2f}")
 
     else:
         img, _ = next(iter(dataloader))
