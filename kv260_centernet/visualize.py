@@ -3,14 +3,37 @@ import os
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader, Subset
 import cv2
 from tqdm import tqdm
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
-from model import CenterNet
-from quantize import get_quantized_model, get_dataloader
+from model import CenterNet, decode_detections
+from data import CocoDetection, collate_fn
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+
+def get_model(args):
+    model = CenterNet(1, "resnet34").eval()
+    model.load_state_dict(torch.load(args.weights, map_location="cpu"))
+
+    sample_inputs = torch.randn((1,3,args.img_h,args.img_w))
+    if args.quant_model:
+        # lazy import, so that this script can run outside Vitis AI for float model
+        from pytorch_nndct.apis import torch_quantizer
+        
+        quantizer = torch_quantizer("test", model, sample_inputs, output_dir=args.output_dir)
+        model = quantizer.quant_model
+        model.eval()
+
+    model.to(DEVICE)
+    return model
+
+
+imagenet_mean = np.array((0.485, 0.456, 0.406))
+imagenet_std = np.array((0.229, 0.224, 0.225))
 
 RED = (255,0,0)
 GREEN = (0,255,0)
@@ -18,7 +41,7 @@ BLUE = (0,0,255)
 WHITE = (255,255,255)
 BLACK = (0,0,0)
 
-def draw_bboxes(image, boxes, texts=None, text_top=True, color=RED, text_color=WHITE, inplace=False):
+def draw_boxes(image, boxes, texts=None, text_top=True, color=RED, text_color=WHITE, inplace=False):
     box_thickness = 5
     font = cv2.FONT_HERSHEY_DUPLEX
     text_size = 2
@@ -52,42 +75,59 @@ def draw_bboxes(image, boxes, texts=None, text_top=True, color=RED, text_color=W
 
 
 @torch.no_grad()
-def visualize(model: CenterNet, dataloader, save_dir):
+def visualize(model: CenterNet, dataloader, save_dir, threshold=0.3):
+    os.makedirs(save_dir, exist_ok=True)
     model.eval()
 
+    count = 1
     for images, targets in tqdm(dataloader):
-        images_np = images.clone().numpy()
+        images_np = images.clone().numpy().transpose(0,2,3,1)
+        images_np = images_np * imagenet_std.reshape(1,1,1,3) + imagenet_mean.reshape(1,1,1,3)
+        images_np = (images_np * 255).astype(np.uint8)
+
         heatmap, box_offsets = model(images.to(DEVICE))
-        detections = model.decode_detections(heatmap, box_offsets)
+        detections = decode_detections(heatmap.sigmoid(), box_offsets)
         detections = {k: v.cpu().numpy() for k, v in detections.items()}
 
-        for img, boxes, scores, labels, target in zip(images_np, detections["boxes"], detections["scores"], detections["labels"], targets):
-            img_w = target["image_width"]
+        for img, boxes, scores, target in zip(images_np, detections["boxes"], detections["scores"], targets):
+            img_w = target["image_width"]                   # original sizes
             img_h = target["image_height"]
             gt_boxes = np.array(target["boxes"])
-            gt_labels = np.array(target["labels"])
+            gt_boxes[...,[0,2]] *= img_w / img.shape[1]     # convert to original sizes
+            gt_boxes[...,[1,3]] *= img_h / img.shape[0]
+            gt_boxes[...,[2,3]] += gt_boxes[...,[0,1]]      # xywh to xyxy
+            gt_boxes = gt_boxes.round().astype(int)
 
-            boxes[...,[0,2]] *= img_w / img.shape[-1]
-            boxes[...,[1,3]] *= img_h / img.shape[-2]
-
+            mask = scores > threshold                       # filter
+            boxes = boxes[mask]
+            scores = scores[mask]
+            boxes[...,[0,2]] *= img_w                       # convert to original sizes
+            boxes[...,[1,3]] *= img_h
+            boxes = boxes.round().astype(int)
 
             img = cv2.resize(img, (img_w, img_h))
+            draw_boxes(img, gt_boxes, texts=["ground truth"]*len(gt_boxes), text_top=True, color=GREEN, text_color=BLACK, inplace=True)
+            draw_boxes(img, boxes, texts=[f"prediction: {x*100:.0f}%" for x in scores], text_top=False, color=RED, text_color=WHITE, inplace=True)
+
+            cv2.imwrite(os.path.join(save_dir, f"image_{count:04d}.jpg"), img[...,::-1])
+            count += 1
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser()    
+    parser = argparse.ArgumentParser()
     parser.add_argument("--num_classes", type=int, default=1)
-    parser.add_argument("--weights", type=str)
-    parser.add_argument("--output_dir", type=str, default="centernet")
-    parser.add_argument("--data_dir", type=str)
-    parser.add_argument("--ann_json", type=str)
+    parser.add_argument("--weights")
+    parser.add_argument("--output_dir", default="centernet")
+    parser.add_argument("--data_dir")
+    parser.add_argument("--ann_json")
 
     parser.add_argument("--img_w", type=int, default=512)
     parser.add_argument("--img_h", type=int, default=512)
 
     parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--num_samples", type=int, default=None)
+    parser.add_argument("--num_samples", type=int, default=100)
     parser.add_argument("--quant_model", action="store_true")
+    parser.add_argument("--threshold", type=float, default=0.3)
 
     return parser
 
@@ -95,9 +135,20 @@ def get_args_parser():
 if __name__ == "__main__":
     args = get_args_parser().parse_args()
 
-    setattr(args, "command", "test")
-    quant_model, float_model = get_quantized_model(args)
-    dataloader = get_dataloader(args)
+    # build dataloader
+    transform = A.Compose([
+        A.Resize(512, 512),
+        A.Normalize(),
+        ToTensorV2()
+    ], bbox_params=dict(format="coco", label_fields=["labels"], min_area=1))
+    ds = CocoDetection(args.data_dir, args.ann_json, transforms=transform)
+    if args.num_samples < len(ds):
+        ds = Subset(ds, list(range(args.num_samples)))
+    dataloader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=collate_fn)
 
-    # model = quant_model if args.quant_model else float_model
-    visualize(float_model, dataloader, os.path.join(args.output_dir, "visualize"))
+
+    save_dir = 'quant' if args.quant_model else 'float'
+    save_dir = os.path.join(args.output_dir, f"visualize_{save_dir}")
+
+    model = get_model(args)
+    visualize(model, dataloader, save_dir, threshold=args.threshold)

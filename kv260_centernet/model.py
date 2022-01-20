@@ -121,7 +121,9 @@ def decode_detections(heatmap, box_offsets):
     y1 = cy - torch.gather(box_offsets[:,1], dim=-1, index=indices)     # y1 = cy - top
     x2 = cx + torch.gather(box_offsets[:,2], dim=-1, index=indices)     # x2 = cx + right
     y2 = cy + torch.gather(box_offsets[:,3], dim=-1, index=indices)     # y2 = cy + bottom
-    boxes = torch.stack((x1, y1, x2, y2), dim=-1) * 4                   # convert to input coordinates
+    boxes = torch.stack((x1, y1, x2, y2), dim=-1)
+    boxes[...,[0,2]] /= out_w                                           # normalize to [0,1]
+    boxes[...,[1,3]] /= out_h
 
     return {
         "boxes": boxes,

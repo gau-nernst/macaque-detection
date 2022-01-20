@@ -68,9 +68,11 @@ def validate(model: CenterNet, dataloader, num_classes):
     for images, targets in tqdm(dataloader):
         images = images.to(DEVICE)
         heatmap, box_offsets = model(images)
-        detections = decode_detections(heatmap, box_offsets)
+        detections = decode_detections(heatmap.sigmoid(), box_offsets)
 
         detections = {k: v.cpu().numpy() for k, v in detections.items()}
+        detections["boxes"][...,[0,2]] *= images.shape[2]               # convert to input images coordinates
+        detections["boxes"][...,[1,3]] *= images.shape[1]
         detections["boxes"][...,2] -= detections["boxes"][...,0]
         detections["boxes"][...,3] -= detections["boxes"][...,1]
         keys = detections.keys()

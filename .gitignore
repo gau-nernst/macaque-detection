@@ -3,3 +3,6 @@ __pycache__
 *.xmodel
 compile/
 quant_info.json
+*.jpg
+*.mp4
+*.avi
