@@ -1,9 +1,20 @@
 import numpy as np
-from scipy.ndimage.filters import maximum_filter
+# from scipy.ndimage.filters import maximum_filter
 
 
-def maxpool(x: np.ndarray, kernel=3, fill=0.):
-    return maximum_filter(x, size=kernel, mode='constant', cval=fill)
+def maxpool(a: np.ndarray, kernel=3):
+    # return maximum_filter(a, size=kernel, mode='constant', cval=0)
+    h, w, c = a.shape
+    pad = (kernel-1) // 2
+    a = a.copy()
+    padded_a = np.zeros((h+pad*2, w+pad*2, c), dtype=a.dtype)
+    padded_a[pad:-pad,pad:-pad,:] = a
+    for i in range(c):
+        for i_x in range(pad, w+pad):
+            for i_y in range(pad, h+pad):
+                a[i_y-pad,i_x-pad,i] = np.max(padded_a[i_y-pad:i_y+pad+1,i_x-pad:i_x+pad+1,i])
+
+    return a
 
 def decode(heatmap: np.ndarray, box_offsets: np.ndarray, num_detections=100):
     img_h, img_w, n_classes = heatmap.shape
