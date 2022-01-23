@@ -185,6 +185,8 @@ python3 app.py profile --xmodel r18_kv260.xmodel --image cat_224.jpg
 
 ## Profiling results
 
+Prediction with 224 x 224 input
+
 Model      | Network time (ms/img) | FPS (img/s)
 -----------|-----------------------|------------
 ResNet-18  | 6.1730  | 161.9953
