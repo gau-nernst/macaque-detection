@@ -89,16 +89,16 @@ def get_args_parser():
     parser.add_argument("command", type=str)
     
     parser.add_argument("--num_classes", type=int, default=1)
-    parser.add_argument("--weights", type=str)
-    parser.add_argument("--output_dir", type=str, default="./centernet")
-    parser.add_argument("--data_dir", type=str)
-    parser.add_argument("--ann_json", type=str)
+    parser.add_argument("--weights")
+    parser.add_argument("--output_dir", default="./centernet")
+    parser.add_argument("--data_dir")
+    parser.add_argument("--ann_json")
 
     parser.add_argument("--img_w", type=int, default=512)
     parser.add_argument("--img_h", type=int, default=512)
 
     parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--num_samples", type=int, default=None)
+    parser.add_argument("--num_samples", type=int, default=0)
 
     return parser
 
