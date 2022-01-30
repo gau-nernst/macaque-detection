@@ -5,10 +5,13 @@ import io
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-import albumentations as A
-from pycocotools.coco import COCO
-from pycocotools.cocoeval import COCOeval
 from PIL import Image
+try:
+    from pycocotools.coco import COCO
+    from pycocotools.cocoeval import COCOeval
+except ImportError:
+    COCO = None
+    COCOeval = None
 
 
 class ImageFolder(Dataset):
@@ -39,7 +42,7 @@ def _clip_box(xywh_box, img_w, img_h):
 
 
 class CocoDetection(Dataset):
-    def __init__(self, img_dir, ann_json, transforms: A.Compose=None):
+    def __init__(self, img_dir, ann_json, transforms=None):
         # https://github.com/facebookresearch/detectron2/blob/main/detectron2/data/datasets/coco.py
         # https://cocodataset.org/#format-data
         if transforms is not None:
@@ -107,7 +110,7 @@ class CocoDetection(Dataset):
         return len(self.img_names)
 
 
-def collate_fn(batch):
+def coco_collate(batch):
     images = torch.stack([x[0] for x in batch], dim=0)
     targets = tuple(x[1] for x in batch)
     return images, targets

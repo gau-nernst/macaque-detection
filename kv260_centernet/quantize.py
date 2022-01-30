@@ -4,7 +4,7 @@ from pytorch_nndct.apis import torch_quantizer
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, ConcatDataset
 from torch.utils.data._utils.collate import default_collate
 import torchvision.transforms as T
 from tqdm import tqdm
@@ -12,7 +12,7 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 from model import CenterNet, decode_detections
-from data import ImageFolder, CocoDetection, collate_fn, CocoEvaluator
+from data import ImageFolder, CocoDetection, coco_collate, CocoEvaluator
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -31,33 +31,25 @@ def get_quantized_model(args):
     return quant_model, model, quantizer
 
 
-def get_dataloader(args):
-    if args.command == "test":
+def get_dataset(data_dir, img_h=512, img_w=512, ann_json=None, detection=False):
+    if detection:
         transform = A.Compose([
-            A.Resize(512, 512),
+            A.Resize(img_h, img_w),
             A.Normalize(),
             ToTensorV2()
         ], bbox_params=dict(format="coco", label_fields=["labels"], min_area=1))
-        ds = CocoDetection(args.data_dir, args.ann_json, transforms=transform)
-        collate = collate_fn
+        ds = CocoDetection(data_dir, ann_json, transforms=transform)
 
     else:
         transform = T.Compose([
-            T.Resize((args.img_h,args.img_w)),
+            T.Resize((img_h, img_w)),
             T.ToTensor(),
             T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
         ])
-        ds = ImageFolder(args.data_dir, transform=transform)
-        collate = default_collate
+        ds = ImageFolder(data_dir, transforms=transform)
     
-    if args.command == "export":
-        args.num_samples = 1
-    
-    if args.num_samples > 0 and args.num_samples < len(ds):
-        ds = Subset(ds, list(range(args.num_samples)))
+    return ds
 
-    dataloader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=collate)
-    return dataloader
 
 
 @torch.no_grad()
@@ -68,11 +60,12 @@ def validate(model: CenterNet, dataloader, num_classes):
     for images, targets in tqdm(dataloader):
         images = images.to(DEVICE)
         heatmap, box_offsets = model(images)
-        detections = decode_detections(heatmap.sigmoid(), box_offsets)
+        heatmap = heatmap.sigmoid()
+        detections = decode_detections(heatmap, box_offsets)
 
         detections = {k: v.cpu().numpy() for k, v in detections.items()}
-        detections["boxes"][...,[0,2]] *= images.shape[2]               # convert to input images coordinates
-        detections["boxes"][...,[1,3]] *= images.shape[1]
+        detections["boxes"][...,[0,2]] *= images.shape[3]               # convert to input images coordinates
+        detections["boxes"][...,[1,3]] *= images.shape[2]
         detections["boxes"][...,2] -= detections["boxes"][...,0]
         detections["boxes"][...,3] -= detections["boxes"][...,1]
         keys = detections.keys()
@@ -106,13 +99,24 @@ def get_args_parser():
 if __name__ == "__main__":
     args = get_args_parser().parse_args()
     assert args.command in ("calibrate", "test", "export")
+    if args.command == 'export':
+        args.num_samples = 1
+    detection = args.command == 'test'
+    collate_fn = coco_collate if detection else default_collate
 
     quant_model, float_model, quantizer = get_quantized_model(args)
-    dataloader= get_dataloader(args)
-
+    dataset = get_dataset(
+        args.data_dir, args.img_h, args.img_w, args.ann_json, detection=detection
+    )
+    if 0 < args.num_samples < len(dataset):
+        dataset = Subset(dataset, list(range(args.num_samples)))
+    dataloader = DataLoader(
+        dataset, batch_size=args.batch_size, num_workers=4,
+        collate_fn=collate_fn, pin_memory=True
+    )
 
     if args.command == "calibrate":
-        for images, _ in tqdm(dataloader):
+        for images in tqdm(dataloader):
             images = images.to(DEVICE)
             with torch.no_grad():
                 quant_model(images)
@@ -127,7 +131,7 @@ if __name__ == "__main__":
         print(f"Original model mAP: {float_metrics['mAP']*100:.2f}")
 
     else:
-        img, _ = next(iter(dataloader))
+        img = next(iter(dataloader))
         img = img.to(DEVICE)
         with torch.no_grad():
             quant_model(img)

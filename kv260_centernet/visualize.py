@@ -10,7 +10,7 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 from model import CenterNet, decode_detections
-from data import CocoDetection, collate_fn
+from data import CocoDetection, coco_collate
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -144,7 +144,7 @@ if __name__ == "__main__":
     ds = CocoDetection(args.data_dir, args.ann_json, transforms=transform)
     if args.num_samples < len(ds):
         ds = Subset(ds, list(range(args.num_samples)))
-    dataloader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=collate_fn)
+    dataloader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=coco_collate)
 
 
     save_dir = 'quant' if args.quant_model else 'float'

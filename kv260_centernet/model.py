@@ -56,24 +56,13 @@ class FPN(nn.Module):
         return outputs[-1]
 
 
-class Head(nn.Module):
-    def __init__(self, in_channels, out_channels, width=256):
+class Head(nn.Sequential):
+    def __init__(self, in_channels, out_channels, width=256, depth=3):
         super().__init__()
-        self.layers = nn.Sequential(
-            nn.Conv2d(in_channels, width, 3, padding=1, bias=False),
-            nn.BatchNorm2d(width),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(width, width, 3, padding=1, bias=False),
-            nn.BatchNorm2d(width),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(width, width, 3, padding=1, bias=False),
-            nn.BatchNorm2d(width),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(width, out_channels, 1)
-        )
-    
-    def forward(self, x):
-        return self.layers(x)
+        for i in range(depth):
+            in_c = in_channels if i == 0 else width
+            self.add_module(f'block_{i+1}', ConvBnAct(in_c, width))
+        self.out_conv = nn.Conv2d(width, out_channels, 1)
 
 
 class CenterNet(nn.Module):
@@ -89,8 +78,9 @@ class CenterNet(nn.Module):
     def forward(self, x):
         out = self.backbone(x)
         out = self.neck(out)
-        return self.heads.heatmap(out), self.heads.box_2d(out)
-        # return torch.cat((self.heads.heatmap(out), self.heads.box_2d(out)), dim=1)
+        heatmap = self.heads.heatmap(out)
+        box_offsets = self.heads.box_2d(out)
+        return heatmap, box_offsets
 
 
 def decode_detections(heatmap, box_offsets):
