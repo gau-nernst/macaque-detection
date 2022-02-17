@@ -16,22 +16,23 @@ API_KEY = "ENTER BOT TOKEN"
 CHANNEL_ID = "CH_ID"
 DEVICE_NAME = "LOCATION"
 
-bot = telebot.TeleBot(API_KEY)
+BOT = telebot.TeleBot(API_KEY)
+CAM = cv2.VideoCapture(0)
 
-@bot.message_handler(commands=["Help"])
+@BOT.message_handler(commands=["Help"])
 def help_Message(message):
     out_message= "Hi there, I am a Maccaque Detection bot"
-    bot.send_message(message.chat.id, out_message)
+    BOT.send_message(message.chat.id, out_message)
 
 def call_Debug(message):
     return message.text.lower() == 'debug'
 
-@bot.message_handler(func=call_Debug)
+@BOT.message_handler(func=call_Debug)
 def debug_Message(message):
     out_message = f"Debugging {DEVICE_NAME}."
     # Following command used to send message directly to channel
     requests.post(f'https://api.telegram.org/bot{API_KEY}/sendMessage?chat_id={CHANNEL_ID}&text={out_message}')
-    bot.send_message(message.chat.id, out_message)
+    BOT.send_message(message.chat.id, out_message)
 
 def sigmoid(x: np.ndarray):
     return 1 / (1 + np.exp(-x))
@@ -116,14 +117,26 @@ def get_args_parser():
     parser.add_argument("--xmodel")
     parser.add_argument("--runs", type=int, default=100)
     return parser
-bot.polling()
+BOT.polling()
 
 if __name__ == "__main__":
-    args = get_args_parser().parse_args()
-    
-    if args.command == "predict":
-        predict(args)
-    elif args.command == "profile":
-        profile(args)
-    else:
-        raise ValueError()
+    state = 0
+    while True:
+        # get image
+        ret, img = CAM.read()
+        if ret:
+            boxes, scores = predict(img)
+        
+            if len(boxes) > 0:
+                if state == 0:
+                    BOT.send_message(CHANNEL_ID, "yo")
+                    state = 1
+
+                    # draw bounding box
+                    img_bin = cv2.imencode(".jpg", img)[1]
+                    BOT.send_photo(CHANNEL_ID, img_bin)
+
+                time.sleep(10)
+            
+            else:
+                state = 0
