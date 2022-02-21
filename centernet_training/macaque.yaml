@@ -1,0 +1,47 @@
+model:
+  num_classes: 1
+  backbone: darknet_yolov5m
+  neck: FPN
+  neck_config:
+    out_channels: 256
+  
+  head_config:
+    width: 256
+    depth: 2
+
+  optimizer_config:
+    optimizer: AdamW
+    lr: 0.00005               # 5e-4 for batch size 128 during pre-training. reduce by 10x during fine-tuning
+    weight_decay: 0.001
+    norm_weight_decay: 0
+    warmup_epochs: 5
+    warmup_decay: 0.01
+    channels_last: true
+
+  # data
+  train_data:
+    batch_size: 64
+    num_workers: 8
+    transforms: configs/data/augment_train.yaml
+    # pre-training
+    # img_dir: ../datasets/macaquepose_v1/images
+    # ann_json: ../datasets/macaquepose_v1/all.json
+    
+    # fine-tuning
+    img_dir: ../datasets/NTU_macaque_videos/images
+    ann_json: ../datasets/NTU_macaque_videos/ntu_macaques_train.json
+
+  val_data:
+    batch_size: 1
+    num_workers: 8
+    transforms: configs/data/augment_val.yaml
+    img_dir: ../datasets/NTU_macaque_videos/images
+    ann_json: ../datasets/NTU_macaque_videos/ntu_macaques_val.json
+
+trainer:
+  gpus: 2
+  # strategy: null
+  max_epochs: 10
+  log_every_n_steps: 20
+
+  logger: true
