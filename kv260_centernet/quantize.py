@@ -1,7 +1,7 @@
+# standard libraries
 import argparse
 
-from pytorch_nndct.apis import torch_quantizer
-
+# 3rd party libraries
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Subset, ConcatDataset
@@ -11,15 +11,19 @@ from tqdm import tqdm
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-from model import CenterNet, decode_detections
-from data import ImageFolder, CocoDetection, coco_collate, CocoEvaluator
+# local files
+from model import build_model, decode_detections
+from data import CalibrationDataset, CocoDetection, coco_collate, CocoEvaluator
+
+# Vitis AI
+from pytorch_nndct.apis import torch_quantizer
+
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def get_quantized_model(args):
-    model = CenterNet(1, "resnet34").eval()
-    model.load_state_dict(torch.load(args.weights, map_location="cpu"))
+    model = build_model(args.weights, 'darknet_yolov5m')
 
     sample_inputs = torch.randn((1,3,args.img_h,args.img_w))
     mode = "calib" if args.command == "calibrate" else "test"
@@ -34,26 +38,27 @@ def get_quantized_model(args):
 def get_dataset(data_dir, img_h=512, img_w=512, ann_json=None, detection=False):
     if detection:
         transform = A.Compose([
-            A.Resize(img_h, img_w),
-            A.Normalize(),
+            A.SmallestMaxSize(max(args.img_h, args.img_w)),
+            A.CenterCrop(args.img_h, args.img_w),
+            A.Normalize(mean=(0,0,0), std=(1,1,1)),
             ToTensorV2()
         ], bbox_params=dict(format="coco", label_fields=["labels"], min_area=1))
         ds = CocoDetection(data_dir, ann_json, transforms=transform)
 
     else:
         transform = T.Compose([
-            T.Resize((img_h, img_w)),
+            T.Resize(max(args.img_h, args.img_w)),
+            T.CenterCrop((args.img_h, args.img_w)),
             T.ToTensor(),
-            T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+            T.Normalize(mean=(0,0,0), std=(1,1,1))
         ])
-        ds = ImageFolder(data_dir, transforms=transform)
+        ds = CalibrationDataset(data_dir, transforms=transform)
     
     return ds
 
 
-
 @torch.no_grad()
-def validate(model: CenterNet, dataloader, num_classes):
+def validate(model, dataloader, num_classes):
     model.eval()
     evaluator = CocoEvaluator(num_classes)
     
@@ -75,29 +80,9 @@ def validate(model: CenterNet, dataloader, num_classes):
         evaluator.update(detections, targets)
 
     return evaluator.get_metrics()
-    
-
-def get_args_parser():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("command", type=str)
-    
-    parser.add_argument("--num_classes", type=int, default=1)
-    parser.add_argument("--weights")
-    parser.add_argument("--output_dir", default="./centernet")
-    parser.add_argument("--data_dir")
-    parser.add_argument("--ann_json")
-
-    parser.add_argument("--img_w", type=int, default=512)
-    parser.add_argument("--img_h", type=int, default=512)
-
-    parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--num_samples", type=int, default=0)
-
-    return parser
 
 
-if __name__ == "__main__":
-    args = get_args_parser().parse_args()
+def main(args):
     assert args.command in ("calibrate", "test", "export")
     if args.command == 'export':
         args.num_samples = 1
@@ -137,3 +122,27 @@ if __name__ == "__main__":
             quant_model(img)
 
         quantizer.export_xmodel(output_dir=args.output_dir)
+
+
+def get_args_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", type=str)
+    
+    parser.add_argument("--num_classes", type=int, default=1)
+    parser.add_argument("--weights")
+    parser.add_argument("--output_dir", default="./centernet")
+    parser.add_argument("--data_dir")
+    parser.add_argument("--ann_json")
+
+    parser.add_argument("--img_w", type=int, default=512)
+    parser.add_argument("--img_h", type=int, default=512)
+
+    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--num_samples", type=int, default=0)
+
+    return parser
+
+
+if __name__ == "__main__":
+    args = get_args_parser().parse_args()
+    main(args)

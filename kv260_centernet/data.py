@@ -14,15 +14,28 @@ except ImportError:
     COCOeval = None
 
 
-class ImageFolder(Dataset):
+class CalibrationDataset(Dataset):
     def __init__(self, img_dir, transforms=None):
         super().__init__()
-        self.img_dir = img_dir
-        self.images = [x for x in os.listdir(img_dir) if x.lower().endswith((".jpg", ".jpeg"))]
+        images = []
+        def get_all_images(dir):
+            files = os.listdir(dir)
+            for file in files:
+                full_path = os.path.join(dir, file)
+
+                if file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    images.append(full_path)
+                
+                elif os.path.isdir(full_path):
+                    get_all_images(full_path)
+
+        get_all_images(img_dir)
+        print(f'Discovered {len(images)} images')
+        self.images = images
         self.transforms = transforms
 
     def __getitem__(self, idx):
-        img = Image.open(os.path.join(self.img_dir, self.images[idx]))
+        img = Image.open(self.images[idx])
         if self.transforms is not None:
             img = self.transforms(img)
         return img

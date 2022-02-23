@@ -1,0 +1,3 @@
+albumentations
+pycocotools
+git+https://github.com/gau-nernst/vision-toolbox.git
