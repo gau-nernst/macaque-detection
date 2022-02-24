@@ -1,23 +1,25 @@
-import argparse
+#!/usr/bin/python3
+from typing import Tuple
 import time
 
 import numpy as np
 import cv2
+import telebot
 
+# Vitis AI libraries
 import xir
 import vart
 
-from decode import decode
-
-import telebot
-import requests
 
 API_KEY = "ENTER BOT TOKEN"
 CHANNEL_ID = "CH_ID"
 DEVICE_NAME = "LOCATION"
+THRESHOLD = 0.3
+XMODEL_PATH = "centernet.xmodel"
 
 BOT = telebot.TeleBot(API_KEY)
 CAM = cv2.VideoCapture(0)
+
 
 @BOT.message_handler(commands=["Help"])
 def help_Message(message):
@@ -30,13 +32,35 @@ def call_Debug(message):
 @BOT.message_handler(func=call_Debug)
 def debug_Message(message):
     out_message = f"Debugging {DEVICE_NAME}."
-    # Following command used to send message directly to channel
-    requests.post(f'https://api.telegram.org/bot{API_KEY}/sendMessage?chat_id={CHANNEL_ID}&text={out_message}')
+    BOT.send_message(CHANNEL_ID, out_message)
     BOT.send_message(message.chat.id, out_message)
 
+
+# operations
 def sigmoid(x: np.ndarray):
     return 1 / (1 + np.exp(-x))
 
+def maxpool(a: np.ndarray, kernel=3):
+    # return maximum_filter(a, size=kernel, mode='constant', cval=0)
+    h, w = a.shape
+    pad = (kernel-1) // 2
+    a = a.copy()
+    padded_a = np.zeros((h+pad*2, w+pad*2), dtype=a.dtype)
+    padded_a[pad:-pad,pad:-pad,:] = a
+    for i_y in range(h):
+        for i_x in range(w):
+            np.max(padded_a[i_y:i_y+kernel,i_x:i_x+kernel], axis=(0,1), out=a[i_y,i_x])
+    return a
+
+
+# DPU helpers
+def initialize_dpu(xmodel_path):
+    g = xir.Graph.deserialize(xmodel_path)
+    subgraphs = g.get_root_subgraph().toposort_child_subgraph()
+    dpu_subgraph = subgraphs[1]
+
+    dpu = vart.Runner.create_runner(dpu_subgraph, "run")
+    return dpu
 
 def prepare_dpu_buffers(dpu):
     input_tensors = dpu.get_input_tensors()
@@ -46,41 +70,42 @@ def prepare_dpu_buffers(dpu):
     return in_buffers, out_buffers
 
 
-def profile(args, runs=100):
-    img = cv2.imread(args.image)
-    img = img.astype(np.float32) / 255.
-
-    g = xir.Graph.deserialize(args.xmodel)
-    subgraphs = g.get_root_subgraph().toposort_child_subgraph()
-    dpu_subgraph = subgraphs[1]
-
-    dpu = vart.Runner.create_runner(dpu_subgraph, "run")
+# detection helpers
+def decode_detections(heatmap: np.ndarray, box_offsets: np.ndarray, image_shape: Tuple[int, int], num_detections=100):
+    output_h, output_w = heatmap.shape[:2]
+    mask = heatmap == maxpool(heatmap)          # pseudo-nms
+    heatmap = heatmap * mask
+    heatmap = np.flatten(heatmap)               # (H, W, 1) -> (HW,)
     
-    in_buffers, out_buffers = prepare_dpu_buffers(dpu)
-    img = cv2.resize(img, in_buffers[0][0].shape[:2])
-    in_buffers[0][0] = img
+    indices = np.argsort(-heatmap)[:num_detections]     # get topk
+    scores = heatmap[indices]
     
-    time0 = time.time()
-    for _ in range(runs):
-        job_id = dpu.execute_async(in_buffers, out_buffers)
-        dpu.wait(job_id)
+    # decode boxes
+    cx = indices % output_w + 0.5
+    cy = indices // output_w + 0.5
+    box_offsets = box_offsets.reshape(-1, 4)    # (H, W, 4) -> (HW, 4)
 
-    dtime = time.time() - time0
-    print(f"{runs} runs")
-    print(f"Network time: {dtime/runs*1000:.4f} ms/img")
-    print(f"FPS: {runs/dtime:.4f} img/s")
+    boxes = np.stack((cx,cy,cx,cy), axis=-1)
+    boxes[...,:2] -= box_offsets[indices,:2]
+    boxes[...,2:] += box_offsets[indices,2:]
+
+    boxes[...,:2] *= image_shape[1] / output_w
+    boxes[...,2:] *= image_shape[0] / output_h
+
+    return boxes, scores
+
+def draw_boxes(img: np.ndarray, boxes: np.ndarray):
+    img = img.copy()
+    boxes = boxes.round.astype(int)
+    for box in boxes:
+        cv2.rectangle(img, box[:2], box[2:], (255,0,0), 2)
+    return img
 
 
-def predict(args):
-    img = cv2.imread(args.image)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img_input = img.astype(np.float32) / 255.
-
-    g = xir.Graph.deserialize(args.xmodel)
-    subgraphs = g.get_root_subgraph().toposort_child_subgraph()
-    dpu_subgraph = subgraphs[1]
-
-    dpu = vart.Runner.create_runner(dpu_subgraph, "run")
+def predict(img: np.ndarray, dpu):
+    '''Input is an uint8 RGB image
+    '''
+    img_input = img.astype(np.float32) / 255.       # [0,255] uint8 -> float32 [0,1]
 
     in_buffers, out_buffers = prepare_dpu_buffers(dpu)
     img_input = cv2.resize(img_input, in_buffers[0][0].shape[:2])
@@ -90,34 +115,14 @@ def predict(args):
     dpu.wait(job_id)
 
     heatmap, box_offsets = out_buffers
-    boxes, scores, labels = decode(sigmoid(heatmap[0]), box_offsets[0])
-    mask = scores > args.threshold
+    boxes, scores = decode_detections(sigmoid(heatmap[0]), box_offsets[0], img_input.shape)
+    mask = scores > THRESHOLD
     boxes = boxes[mask]
     scores = scores[mask]
-    broadcast_msg = f'Detect {len(boxes)} macaques at {DEVICE_NAME}'
-    print(broadcast_msg)
-    if len(boxes)>0:
-            requests.post(f'https://api.telegram.org/bot{API_KEY}/sendMessage?chat_id={CHANNEL_ID}&text={broadcast_msg}')
+    
+    return boxes, scores
 
-
-    boxes[...,[0,2]] *= img.shape[1] / img_input.shape[1]
-    boxes[...,[1,3]] *= img.shape[0] / img_input.shape[0]
-    boxes = boxes.round().astype(int)
-    for x1,y1,x2,y2 in boxes:
-        cv2.rectangle(img, (x1,y1), (x2,y2), (255,0,0), 2)
-    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    cv2.imwrite('prediction.jpg', img)
-
-
-def get_args_parser():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("command")
-    parser.add_argument("--image")
-    parser.add_argument("--threshold", type=float, default=0.3)
-    parser.add_argument("--xmodel")
-    parser.add_argument("--runs", type=int, default=100)
-    return parser
-BOT.polling()
+# BOT.polling()
 
 if __name__ == "__main__":
     state = 0
@@ -133,7 +138,8 @@ if __name__ == "__main__":
                     state = 1
 
                     # draw bounding box
-                    img_bin = cv2.imencode(".jpg", img)[1]
+                    img = draw_boxes(img, boxes)
+                    ret, img_bin = cv2.imencode(".jpg", img)
                     BOT.send_photo(CHANNEL_ID, img_bin)
 
                 time.sleep(10)
