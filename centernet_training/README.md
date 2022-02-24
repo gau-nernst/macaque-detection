@@ -22,6 +22,11 @@ cd centernet-lightning
 python train.py fit --configs/centernet.yaml --configs configs/macaque.yaml
 ```
 
+Training is done in 2 steps
+
+- Pre-training on macaqueposev1
+- Fine-tuning on some macaque videos from NTU students
+
 ## Export weights for Vitis AI
 
 Extract state dict from the saved checkpoint and rename the keys:
